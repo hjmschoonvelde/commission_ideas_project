@@ -1,0 +1,680 @@
+---
+title: "Script to generate results in Graham, Schoonvelde, Swinkels: Country Specific reports"
+author: "Martijn Schoonvelde"
+date: "August 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We'll first load the pakages that are required to run the analyses in this paper. 
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+library(quanteda)
+library(readtext)
+library(stringr)
+library(quanteda.textplots)
+library(quanteda.textstats)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(summarytools)
+library(gghighlight)
+library(viridis)
+library(LSX)
+library(pdftools)
+library(countrycode)
+library(lme4)
+library(texreg)
+library(arm)
+library(eurostat)
+library(datawizard)
+library(broom.mixed)
+library(ecb)
+library(stargazer)
+
+
+```
+
+Let's read in the LSS data, generated from the **_Data_Cleaning_and_LSS_Estimation.Rmd** file. 
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+lss_data <- read.csv2("lss_data.csv",
+                     header = TRUE,
+                     sep = ";")
+
+lss_data <- subset(lss_data, Document == "CSR") %>%
+  mutate(Application = recode(Application,
+         'AT' = 'AUS',
+         'BE' = 'BEL',
+         'BG' = 'BUL',
+         'CY' = 'CYP',
+         'CZ' = 'CZE',
+         'DE' = 'GER',
+         'DK' = 'DEN',
+         'EE' = 'EST',
+         'EL' = 'GRE',
+         'ES' = 'SPA',
+         'FI' = 'FIN',
+         'FR' = 'FRA',
+         'HR' = 'CROA',
+         'HU' = 'HUN',
+         'IE' = 'IRE',
+         'IT' = 'ITA',
+         'LT' = 'LIT',
+         'LU' = 'LUX',
+         'LV' = 'LAT',
+         'MT' = 'MAL',
+         'NL' = 'NL',
+         'PL' = 'POL',
+         'PT' = 'POR',
+         'RO' = 'ROM',
+         'SE' = 'SWE',
+         'SI' = 'SLV',
+         'SK' = 'SLK',
+         'UK' = 'UK'))
+
+
+  
+```
+
+Download Eurostat debt data using the **eurostat** package
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+id_debt <- search_eurostat("Government deficit/surplus, debt and associated data",
+                           type = "dataset")$code[1]
+
+debt_data <- get_eurostat(id_debt,
+                    time_format = "num")
+
+debt_data <- debt_data %>%
+  filter(unit == "PC_GDP" & sector == "S13" & time > "2009" & na_item == "GD") %>%
+  mutate(geo = recode(geo,
+         'AT' = 'AUS',
+         'BE' = 'BEL',
+         'BG' = 'BUL',
+         'CY' = 'CYP',
+         'CZ' = 'CZE',
+         'DE' = 'GER',
+         'DK' = 'DEN',
+         'EE' = 'EST',
+         'EL' = 'GRE',
+         'ES' = 'SPA',
+         'FI' = 'FIN',
+         'FR' = 'FRA',
+         'HR' = 'CROA',
+         'HU' = 'HUN',
+         'IE' = 'IRE',
+         'IT' = 'ITA',
+         'LT' = 'LIT',
+         'LU' = 'LUX',
+         'LV' = 'LAT',
+         'MT' = 'MAL',
+         'NL' = 'NL',
+         'PL' = 'POL',
+         'PT' = 'POR',
+         'RO' = 'ROM',
+         'SE' = 'SWE',
+         'SI' = 'SLV',
+         'SK' = 'SLK',
+         'UK' = 'UK')) %>%
+  rename(debt_rate = values)
+  
+
+
+debt_data$ms_year <- paste(debt_data$geo, 
+                                    debt_data$time,
+                                    sep = "_")
+
+debt_data$ms_year <- tolower(debt_data$ms_year)
+
+debt_data <- debt_data %>%
+  dplyr::select(ms_year, debt_rate)
+
+```
+
+Load Eurostat unemployment data
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+unemp_data <- read_csv('Econ_data/tipsun20.csv')
+
+unemp_data <- unemp_data %>%
+  dplyr::select(age, unit, geo, TIME_PERIOD, OBS_VALUE) %>%
+  rename(year = TIME_PERIOD,
+         value = OBS_VALUE) %>%
+  filter(age == "Y15-74" & year > 2009) %>%
+  mutate(geo = recode(geo,
+         'AT' = 'AUS',
+         'BE' = 'BEL',
+         'BG' = 'BUL',
+         'CY' = 'CYP',
+         'CZ' = 'CZE',
+         'DE' = 'GER',
+         'DK' = 'DEN',
+         'EE' = 'EST',
+         'EL' = 'GRE',
+         'ES' = 'SPA',
+         'FI' = 'FIN',
+         'FR' = 'FRA',
+         'HR' = 'CROA',
+         'HU' = 'HUN',
+         'IE' = 'IRE',
+         'IT' = 'ITA',
+         'LT' = 'LIT',
+         'LU' = 'LUX',
+         'LV' = 'LAT',
+         'MT' = 'MAL',
+         'NL' = 'NL',
+         'PL' = 'POL',
+         'PT' = 'POR',
+         'RO' = 'ROM',
+         'SE' = 'SWE',
+         'SI' = 'SLV',
+         'SK' = 'SLK',
+         'UK' = 'UK')) %>%
+  rename(unemp_rate = value)
+
+
+unemp_data$ms_year <- paste(unemp_data$geo, 
+                            unemp_data$year,
+                                    sep = "_")
+
+unemp_data$ms_year <- tolower(unemp_data$ms_year)
+
+
+unemp_data <- unemp_data %>%
+  dplyr::select(ms_year, unemp_rate)
+```
+
+
+Download ECB bond yields data using the **ecb** package
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+ez_key <- "IRS.M.AT+BE+CY+DE+EE+ES+FI+FR+GR+HR+IE+IT+LT+LU+LV+MT+NL+PT+SI+SK.L.L40.CI.0000.EUR.N.Z"
+yields_ez_data <- ecb::get_data(ez_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+bulgaria_key <- "IRS.M.BG.L.L40.CI.0000.BGN.N.Z"
+
+yields_bulgaria_data <- ecb::get_data(bulgaria_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+czech_key <- "IRS.M.CZ.L.L40.CI.0000.CZK.N.Z"
+
+yields_czech_data <- ecb::get_data(czech_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+denmark_key <- "IRS.M.DK.L.L40.CI.0000.DKK.N.Z"
+
+yields_denmark_data <- ecb::get_data(denmark_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+hungary_key <- "IRS.M.HU.L.L40.CI.0000.HUF.N.Z"
+
+yields_hungary_data <- ecb::get_data(hungary_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+poland_key <- "IRS.M.PL.L.L40.CI.0000.PLN.N.Z"
+
+yields_poland_data <- ecb::get_data(poland_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+romania_key <- "IRS.M.RO.L.L40.CI.0000.RON.N.Z"
+
+yields_romania_data <- ecb::get_data(romania_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+sweden_key <- "IRS.M.SE.L.L40.CI.0000.SEK.N.Z"
+
+yields_sweden_data <- ecb::get_data(sweden_key) %>%
+  dplyr::select(ref_area, obstime, obsvalue) %>%
+  mutate(obstime = as.numeric(str_sub(obstime, 1, 4))) %>%
+  filter(obstime > 2009) %>%
+  rename(year = obstime, country = ref_area) %>%
+  group_by(country, year) %>%
+  summarise(annual_yield = mean(obsvalue, na.rm = TRUE))
+
+
+yields_data <- rbind(yields_ez_data, 
+                     yields_bulgaria_data, 
+                     yields_czech_data, 
+                     yields_denmark_data, 
+                     yields_hungary_data, 
+                     yields_poland_data, 
+                     yields_romania_data,
+                     yields_sweden_data)
+
+rm(yields_ez_data, yields_bulgaria_data, yields_czech_data, yields_denmark_data, yields_hungary_data, yields_poland_data, yields_romania_data, yields_sweden_data)
+rm(bulgaria_key, czech_key, denmark_key, ez_key, hungary_key, poland_key, romania_key, sweden_key, id_debt)
+
+
+yields_data <- yields_data %>%
+  mutate(country = recode(country,
+         'AT' = 'AUS',
+         'BE' = 'BEL',
+         'BG' = 'BUL',
+         'CY' = 'CYP',
+         'CZ' = 'CZE',
+         'DE' = 'GER',
+         'DK' = 'DEN',
+         'EE' = 'EST',
+         'EL' = 'GRE',
+         'ES' = 'SPA',
+         'FI' = 'FIN',
+         'FR' = 'FRA',
+         'HR' = 'CROA',
+         'HU' = 'HUN',
+         'IE' = 'IRE',
+         'IT' = 'ITA',
+         'LT' = 'LIT',
+         'LU' = 'LUX',
+         'LV' = 'LAT',
+         'MT' = 'MAL',
+         'NL' = 'NL',
+         'PL' = 'POL',
+         'PT' = 'POR',
+         'RO' = 'ROM',
+         'SE' = 'SWE',
+         'SI' = 'SLV',
+         'SK' = 'SLK',
+         'UK' = 'UK'))
+
+yields_data$ms_year <- paste(yields_data$country, 
+                             yields_data$year,
+                             sep = "_")
+
+yields_data$ms_year <- tolower(yields_data$ms_year)
+
+
+yields_data$year <- NULL
+yields_data$country <- NULL
+
+```
+
+
+Import the Eurobarometer data
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+eb_data <- readRDS('EB_data/eb_data.rds')
+
+eb_data <- eb_data %>%
+  mutate(country = recode(country,
+         'Austria' = 'AUS',
+         'Belgium' = 'BEL',
+         'Bulgaria' = 'BUL',
+         'Cyprus' = 'CYP',
+         'Czech Republic' = 'CZE',
+         'Germany' = 'GER',
+         'Denmark' = 'DEN',
+         'Estonia' = 'EST',
+         'Greece' = 'GRE',
+         'Spain' = 'SPA',
+         'Finland' = 'FIN',
+         'France' = 'FRA',
+         'Croatia' = 'CROA',
+         'Hungary' = 'HUN',
+         'Ireland' = 'IRE',
+         'Italy' = 'ITA',
+         'Lithuania' = 'LIT',
+         'Luxembourg' = 'LUX',
+         'Latvia' = 'LAT',
+         'Malta' = 'MAL',
+         'Netherlands' = 'NL',
+         'Poland' = 'POL',
+         'Portugal' = 'POR',
+         'Romania' = 'ROM',
+         'Sweden' = 'SWE',
+         'Slovenia' = 'SLV',
+         'Slovakia' = 'SLK',
+         'Great Britain' = 'UK'))
+
+eb_data$ms_year <- paste(eb_data$country, 
+                            eb_data$year,
+                                    sep = "_")
+
+eb_data$ms_year <- tolower(eb_data$ms_year)
+
+eb_data <- eb_data %>%
+  dplyr::select(ms_year, net_trust)
+
+eb_data$year <- NULL
+
+```
+
+Create a **year_ms** variable for merging the datasets
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+lss_data$ms_year <- paste(lss_data$Application, substr(lss_data$Year,1,4), sep = "_") %>%
+  tolower()
+
+lss_data <- left_join(lss_data, unemp_data, by = "ms_year")
+lss_data <- left_join(lss_data, debt_data, by = "ms_year")
+lss_data <- left_join(lss_data, eb_data, by = "ms_year")
+lss_data <- left_join(lss_data, yields_data, by = "ms_year")
+
+```
+
+Create lagged variables
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+lss_data <- arrange(lss_data, ms_year)
+
+lss_data$fit_complete <- lss_data$fit
+
+lss_data$fit[lss_data$Year == 2022] <- NA
+
+lss_data$lagged_unemp_rate <- c(NA, lss_data$unemp_rate[-nrow(lss_data)])
+lss_data$lagged_debt_rate <- c(NA, lss_data$debt_rate[-nrow(lss_data)])
+lss_data$lagged_net_trust <- c(NA, lss_data$net_trust[-nrow(lss_data)])
+lss_data$lagged_fit <- c(NA, lss_data$fit[-nrow(lss_data)])
+lss_data$lagged_annual_yield <- c(NA, lss_data$annual_yield[-nrow(lss_data)])
+
+lss_data <- lss_data %>%
+  mutate(Application = recode(Application,
+         'NL' = 'NLD',
+         'UK' = 'GBR')) %>%
+  rename(MS = Application)
+
+```
+
+Add a Commission factor variable
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+lss_data$commission <- NA
+lss_data$commission[lss_data$Year < 2015] <- "Barroso Commission"
+lss_data$commission[lss_data$Year > 2014 & lss_data$Year < 2020] <- "Juncker Commission"
+lss_data$commission[lss_data$Year > 2019] <- "Von der Leyen Commission"
+
+lss_data$commission <- as.factor(lss_data$commission)
+
+```
+
+Run the statistical models
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+ lss_data_complete <- lss_data %>%
+  dplyr::select(MS, fit, Year, lagged_fit, lagged_debt_rate, lagged_unemp_rate, lagged_net_trust, lagged_annual_yield, commission) %>%
+  mutate(lagged_debt_rate = lagged_debt_rate/10,
+         lagged_unemp_rate = lagged_unemp_rate/10) %>%
+  na.omit()
+
+tmp <- demean(lss_data_complete, select = c("lagged_fit", "lagged_debt_rate", "lagged_unemp_rate", "lagged_net_trust", "lagged_annual_yield"), group = "MS")
+
+lss_data_complete <- cbind(lss_data_complete, tmp)
+
+rm(tmp)
+
+
+## Specifying empty model for no. words (A0)
+model_fit0 <- lmer(fit ~ (1 | MS) + (1 | Year),
+                    REML = FALSE,
+                    data = lss_data_complete)
+summary(model_fit0)
+
+
+var_corr_fit0 <- print(VarCorr(model_fit0), comp = "Variance")
+
+
+## Calculating ICC for A0
+MSvar        <- 0.20943
+YEARvar      <- 0.35318
+level1var    <- 0.26918
+level2var    <- MSvar + YEARvar
+totalvar     <- MSvar + YEARvar + level1var
+ICClvl2      <- level2var/totalvar
+ICClvl2
+ICCMStotal   <- MSvar/totalvar
+ICCMStotal
+ICCYEARtotal <- YEARvar/totalvar
+ICCYEARtotal
+
+
+
+#Model 2
+ 
+model_fit2 <- lmer(fit ~ lagged_unemp_rate_within +
+                     lagged_debt_rate_within +
+                     lagged_net_trust_within +
+                     #lagged_annual_yield_within +
+                     commission +
+                     (1 | MS) + (1 | Year),
+                   REML = FALSE,
+                   data = lss_data_complete)
+
+summary(model_fit2)
+
+#Decided not to include 10 year bond rates because of multicollinearity issues (high correlation with unemployment) 
+
+```
+
+Create a regression table
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+tidy_model_fit0 <- broom::tidy(model_fit0)
+tidy_model_fit2 <- broom.mixed::tidy(model_fit2) %>% filter(effect == "fixed")
+
+
+num_countries_model_fit0 <- as.numeric(sapply(ranef(model_fit0),nrow)[1])
+sd_countries_model_fit0 <- round(as.numeric(attributes(VarCorr(model_fit0)$"MS")$stddev), 3)
+num_years_model_fit0 <- as.numeric(sapply(ranef(model_fit0),nrow)[2])
+sd_year_model_fit0 <- round(as.numeric(attributes(VarCorr(model_fit0)$"Year")$stddev), 3)
+
+num_countries_model_fit2 <- as.numeric(sapply(ranef(model_fit2),nrow)[1])
+sd_countries_model_fit2 <- round(as.numeric(attributes(VarCorr(model_fit2)$"MS")$stddev), 3)
+num_years_model_fit2 <- as.numeric(sapply(ranef(model_fit2),nrow)[2])
+sd_year_model_fit2 <- round(as.numeric(attributes(VarCorr(model_fit2)$"Year")$stddev), 3)
+
+
+mod_stats <- tribble(~stat, ~model_fit0, ~model_fit2,
+        "Number of Countries", num_countries_model_fit0, num_countries_model_fit2,
+        "sd(Country)", sd_countries_model_fit0, sd_countries_model_fit2,
+        "Number of Years", num_years_model_fit0, num_years_model_fit2,
+        "sd(Year)", sd_year_model_fit0, sd_year_model_fit2,
+        "N", nobs(model_fit0), nobs(model_fit2))
+
+
+stargazer(list(model_fit0, model_fit2),
+          digits = 3,
+          type = "text",
+          single.row=FALSE,
+          covariate.labels = c("Lagged unemployment rate, within countries",
+                               #"Lagged unemployment rate, between countries",
+                               "Lagged debt rate, within countries",
+                               #"Lagged debt rate, between countries",
+                               "Lagged trust, within countries",
+                               #"Lagged trust, between countries",
+                               "Juncker Commission",
+                               "Von der Leyen Commission",
+                               "Intercept"),
+          omit.table.layout = "s",
+          add.lines = lapply(1:nrow(mod_stats), function(i) unlist(mod_stats[i, ])),
+          #notes="Data: Country Specific Reports, 2011-22",
+          dep.var.labels="Keynesian - Ordoliberalism LSS score",
+          model.names = FALSE,
+          column.labels = c("Linear Mixed Effects, Null Model", "Linear Mixed Effects"),
+          out = "table.html"
+          )
+
+
+
+```
+
+
+Create a regression plot
+
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+ tidy_model_fit2 <-  tidy_model_fit2 %>%
+  mutate(term = recode(term,
+                        "lagged_unemp_rate_within" = "Lagged unemployment rate, within countries",
+                       # "lagged_unemp_rate_between" = "Lagged unemployment rate, between countries",
+                        "lagged_debt_rate_within" = "Lagged debt rate, within countries",
+                        #"lagged_debt_rate_between" = "Lagged debt rate, between countries",
+                        "lagged_net_trust_within" = "Lagged trust, within countries",
+                        #"lagged_net_trust_between" = "Lagged trust, between countries",
+                        "commissionJuncker Commission" = "Juncker Commission",
+                        "commissionVon der Leyen Commission" = "Von der Leyen Commission",
+                        "(Intercept)" = "Intercept"))
+
+tidy_model_fit2$term <- factor( tidy_model_fit2$term, 
+                                levels=c('Intercept',
+                                         'Von der Leyen Commission',
+                                         'Juncker Commission',
+                                         'Lagged debt rate, within countries',
+                                         #'Lagged debt rate, between countries',
+                                         'Lagged unemployment rate, within countries', 
+                                         #'Lagged unemployment rate, between countries',
+                                         'Lagged trust, within countries'
+                                         #'Lagged trust, between countries'
+                                         ))
+
+coef_plot <- ggplot(tidy_model_fit2, 
+                    aes(x=term, y=estimate)) +
+  geom_point(size = 0.75) +
+  geom_pointrange(ymin=tidy_model_fit2$estimate - 2*tidy_model_fit2$std.error,
+                ymax=tidy_model_fit2$estimate + 2*tidy_model_fit2$std.error, 
+                width=.15) +
+  ylim(c(-1.5, 1.5)) +
+  coord_flip() + 
+  ylab("") +
+  xlab("") + 
+  geom_hline(yintercept=0) +
+  theme_minimal() + 
+  annotate("text", x=6.5, y=0.65, label="more Ordoliberal", color="#56B4E9", size=3.5) +
+  geom_segment(aes(x = 6.5,
+                   y = 1.15 , 
+                   xend = 6.5 , 
+                   yend = 1.5), colour='#56B4E9', size=0.5,arrow = arrow(length = unit(0.25, "cm"))) +
+  annotate("text", x=6.5, y=-0.65, label="more Keynesian", color="#009E73", size=3.5) +
+  geom_segment(aes(x = 6.5,
+                   y = -1.15 , 
+                   xend = 6.5 , 
+                   yend = -1.5), colour='#009E73', size=0.5,arrow = arrow(length = unit(0.25, "cm")))
+print(coef_plot)
+
+ggsave(coef_plot , file = "Figures/coef_plot.pdf",
+       width = 10, height = 8)
+
+
+```
+
+Plot distributions by year
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+csr_aggregated <- ggplot(data = lss_data, aes(x = Year, y= fit_complete)) + 
+  geom_jitter(color = "#d3d3d3") +
+   geom_smooth(span = 0.3, color = "black") +
+  ylab("Predicted polarity of Semester Documents") +
+  scale_x_continuous("Year", labels = as.character(lss_data$Year), breaks = lss_data$Year) +
+  theme_minimal() +   theme(legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle=45)) +   
+  geom_hline(yintercept = 0, 
+             color = "red",
+             size = 0.5) + 
+  annotate("text", x=2021, y=1.25, label="more Ordoliberal", color="#56B4E9", size=3.5) +
+  geom_segment(aes(x = 2021,
+                   y = 0.5 , 
+                   xend = 2021 , 
+                   yend = 1), colour='#56B4E9', size=0.5,arrow = arrow(length = unit(0.25, "cm"))) +
+  annotate("text", x=2021, y=-1.25, label="more Keynesian", color="#009E73", size=3.5) +
+  geom_segment(aes(x = 2021,
+                   y = -0.5 , 
+                   xend = 2021 , 
+                   yend = -1), colour='#009E73', size=0.5,arrow = arrow(length = unit(0.25, "cm")))
+
+
+print(csr_aggregated)
+
+
+ggsave(csr_aggregated , file = "Figures/plot_lss_complete.pdf",
+       width = 10, height = 8)
+```
+
+Plot fit of CSR docs by country
+
+Analysis of results (from playing around with a number of MS etc) - there is certainly differences between the ideas that the Commission emphasises to Member States over time, but there is no discernable trend in this difference. One potenitally interesting finding from a country-specific POV is that the Commission seem to be emphasisng more Keynesian ideas in their recommendations to DE from 2014 on. This aligns with DE increasing their budget surplus from this time (see Tkalec, 2019).
+
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+
+csr_country_plot <- ggplot(data = lss_data, aes(x= Year, y = fit_complete)) + 
+    geom_point(aes(group = MS), size = .75) +
+  gghighlight(unhighlighted_colour = "#d3d3d3") + 
+ ylab("Keynesian - Ordoliberal") +
+  scale_x_continuous(breaks=c(2011,2013, 2015, 2017, 2019, 2021)) + 
+  scale_colour_viridis(discrete = TRUE) +
+  theme_minimal() + facet_wrap( ~ MS) + 
+  theme(legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle=45)) + 
+  geom_hline(yintercept = 0, 
+             color = "red",
+             size = 0.5) 
+ # ggtitle("Keynesian - Ordoliberal sentiment in Country Specific Recommendations 2011-22")
+
+csr_country_plot
+
+ggsave(csr_country_plot, 
+       file = "Figures/csr.pdf",
+       width = 10, 
+       height = 8)
+
+```

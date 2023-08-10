@@ -1,0 +1,545 @@
+---
+title: "Script to generate results in Graham, Schoonvelde, Swinkels"
+author: "Martijn Schoonvelde"
+date: "August 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+We'll first load the libraries that are necessary to run the analyses in this paper. 
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+#load library
+library(quanteda)
+library(readtext)
+library(stringr)
+library(quanteda.textplots)
+library(quanteda.textstats)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(summarytools)
+library(gghighlight)
+library(viridis)
+library(LSX)
+library(pdftools)
+
+
+```
+
+We first import the European semester documents which are stored in a sub folder called `Data`. We'll start by removing the title page from each document. 
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+path_to_folder_ES <- "Data"
+
+Semester_DF <- readtext(paste0(path_to_folder_ES, "/*.pdf"), 
+                        docvarsfrom = "filenames", 
+                        docvarnames = c("Year", "Document", "Author", "Application"),
+                        sep = "_",
+                        encoding = "UTF-8")
+
+all_pdfs <- list.files(path = path_to_folder_ES,
+                       pattern = ".pdf$",
+                       recursive = FALSE,
+                       full.names = TRUE)
+
+all_pdfs <- sort(all_pdfs)
+
+list_pdfs <- lapply(all_pdfs, pdf_text)
+
+
+#check if all pdfs are loaded
+length(list_pdfs)
+
+#check length of all pdfs
+lengths(list_pdfs)
+
+#remove first / title page for each pdf
+
+remove_titlepage <- function(x) {x[-1]}
+list_pdfs <- lapply(list_pdfs, remove_titlepage)
+
+#check length of all pdfs
+lengths(list_pdfs)
+
+Semester_DF$length <- as.numeric(lengths(list_pdfs))
+
+
+list_pdfs <- sapply(list_pdfs, 
+               paste0, 
+               collapse=" ")
+
+#replace text variable with pdfs with first page removed
+Semester_DF$text <- list_pdfs
+
+```
+
+We'll now clean these texts using the `stringr` library
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+url_regex <- "http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
+
+Semester_DF$text <- str_replace_all(Semester_DF$text, "[\n]", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "Graph [0-9]*:.*?(Note:|Source)"," ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, url_regex, "")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "[A-Z]{5,}", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "( EN | THE | OF | TO | FIND | PATH | ADD | AND | FROM | IN )", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "Q\\d", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "[:symbol:]", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "[:digit:]", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "\\(.*?\\)", "")
+Semester_DF$text <- str_squish(Semester_DF$text)
+Semester_DF$text <- str_replace_all(Semester_DF$text, "(\\. ){2,}", "")
+Semester_DF$text <- str_replace_all(Semester_DF$text, " - ", "")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "Done at Brussels.*", "")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "unem ploym ent", "unemployment")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "em ploym ent", "employment")
+
+```
+
+Create density plot of document lengths
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+length_density_plot <- Semester_DF %>%
+  ggplot(aes(x=length)) +
+  geom_density(alpha=0.6, aes(y=..scaled..)) +
+  scale_fill_viridis(discrete=TRUE) +
+  scale_color_viridis(discrete=TRUE) +
+  labs(y = "Density", x ="Number of Pages") +
+ # ggtitle("Distribution of document length") +
+  theme_minimal() + 
+  theme(legend.title=element_blank())
+
+ggsave(length_density_plot , file = "Figures/lengh_density_plot.pdf",
+       width = 10, height = 8)
+
+
+```
+
+We'll specify the `year` variable as a date variable. 
+
+```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
+
+Semester_DF$Year <- lubridate::ymd(Semester_DF$Year, 
+                                    truncated = 2L) %>%
+  year()
+
+```
+
+
+Let's turn this into a **quanteda** corpus object so that we can analyze its textual contents. 
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+corpus_Semester <- corpus(Semester_DF)
+
+```
+
+Let's tokenize this corpus. We'll add padding so that the collocations that we add next are meaningful.
+
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+tokens_Semester <- tokens(corpus_Semester,
+                          what = "word",
+                          remove_punct = TRUE, 
+                          remove_symbols = TRUE, 
+                          remove_separators = TRUE,
+                          split_hyphens = FALSE,
+                          ) %>%
+  tokens_remove(stopwords(source = "smart"), padding = TRUE)
+
+
+Semester_DF$tokens <- as.numeric(ntoken(tokens_Semester))
+
+```
+
+Create density plot of token numbers
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+tokens_density_plot <- Semester_DF %>%
+  ggplot(aes(x=tokens)) +
+  geom_density(alpha=0.6, aes(y=..scaled..)) +
+  scale_fill_viridis(discrete=TRUE) +
+  scale_color_viridis(discrete=TRUE) +
+  labs(y = "Density", x ="Number of tokens") +
+  theme_minimal() + 
+  theme(legend.title=element_blank())
+
+ggsave(tokens_density_plot, file = "Figures/token_density_plot.pdf",
+       width = 10, height = 8)
+
+
+```
+
+Since much of the Commission language is expressed in phrases (e.g., government debt, public debt, European Commission, European Council, regional development fund,  european stability mechanism, etc.) we'll include bigram and trigram collocations, keeping the most informative ones based on lambda.  
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+
+collocations <- tokens_Semester %>%
+  textstat_collocations(min_count = 20,
+                        size = 2:3) %>%
+  arrange(-lambda)
+```
+
+Let's inspect these collocations
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+head(collocations, 100)
+
+```
+
+We use `tokens_compound()` to append the most informative collocations to our tokenized object. Based on visual inspection we take lambda > 10 as a cut-off criterion:
+
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+collocations <- collocations %>%
+  filter(lambda > 10) %>%
+  pull(collocation) %>%
+  phrase()
+
+tokens_Semester <- tokens_compound(tokens_Semester, collocations)
+tokens_Semester <- tokens_compound(tokens_Semester, pattern = phrase(c("european union")), case_insensitive = TRUE)
+tokens_Semester <- tokens_compound(tokens_Semester, pattern = phrase(c("european council")), case_insensitive = TRUE)
+tokens_Semester <- tokens_compound(tokens_Semester, pattern = phrase(c("european commission")), case_insensitive = TRUE)
+tokens_Semester <- tokens_compound(tokens_Semester, pattern = phrase(c("european parliament")), case_insensitive = TRUE)
+
+```
+
+
+We'll turn our corpus into a dfm with no additional feature selection. 
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+dfm_Semester <- dfm(tokens_Semester) 
+
+```
+
+We'll now read in the three seed dictionaries: original, expert and revised for Keynesian and Ordoliberal words.
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+#Ordoliberal
+ordo_dict_original <- read_csv("Dictionary/dict_ord_original.csv",
+                               col_names = FALSE)
+
+ordo_dict_expert <- read_csv("Dictionary/dict_ord_expert.csv",
+                               col_names = FALSE)
+
+ordo_dict_revised <- read_csv("Dictionary/dict_ord_revised.csv",
+                               col_names = FALSE)
+
+#Keynesian
+keynes_dict_original <- read_csv("Dictionary/dict_keynes_original.csv",
+                               col_names = FALSE)
+
+keynes_dict_expert <- read_csv("Dictionary/dict_keynes_exp.csv",
+                               col_names = FALSE)
+
+keynes_dict_revised <- read_csv("Dictionary/dict_keynes_revised.csv",
+                               col_names = FALSE)
+
+```
+
+Let's turn these into dictionary objects.
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+ordo_keynes_dict <- dictionary(list(ordo_original = dplyr::pull(ordo_dict_original, X1),
+                                    keynes_original = dplyr::pull(keynes_dict_original, X1),
+                                    ordo_expert = dplyr::pull(ordo_dict_expert, X1),
+                                    keynes_expert = dplyr::pull(keynes_dict_expert, X1),
+                                    ordo_revised = dplyr::pull(ordo_dict_revised, X1),
+                                    keynes_revised = dplyr::pull(keynes_dict_revised, X1))) 
+
+```
+
+Let's inspect how they apply to the corpus
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+ordo_keynes_dict_dfm <- dfm_lookup(dfm_Semester, dictionary = ordo_keynes_dict)
+
+Semester_DF$Ordo_count_original <- as.numeric(ordo_keynes_dict_dfm[,1])
+Semester_DF$Keynes_count_original <- as.numeric(ordo_keynes_dict_dfm[,2])
+
+```
+
+Let's inspect the coverage of the dictionary (referenced in paper)
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+ordo_keynes_df <- convert(ordo_keynes_dict_dfm, 
+                   to = "data.frame")
+
+
+cor(ordo_keynes_df[,2:7])
+
+```
+
+Interestingly, there is a strong positive correlation between the absolute number of Ordoliberal and Keynes terms. However, if we control for the length of documents this correlation disappears.
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+cor(ordo_keynes_df[,2:7] / ntoken(tokens_Semester))
+
+```
+
+Let's check the coverage of dictionary terms on a sentence to sentence basis. Let's first create a sentence-based dfm
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+corp_Semester_sentence <- corpus_reshape(corpus_Semester, to =  "sentence")
+
+tokens_Semester_sentence <- tokens(corp_Semester_sentence,
+                          what = "word",
+                          remove_punct = TRUE, 
+                          remove_symbols = TRUE, 
+                          remove_separators = TRUE,
+                          split_hyphens = FALSE,
+                          ) %>%
+  tokens_remove(stopwords(source = "smart"), padding = TRUE)
+
+tokens_Semester_sentence <- tokens_compound(tokens_Semester_sentence, collocations)
+
+dfm_Semester_sentence <- dfm(tokens_Semester_sentence)
+
+```
+
+Let's inspect the most ordoliberal and Keyenesian sentences.
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+ordo_dict_original_dfm_sentence <- dfm_lookup(dfm_Semester_sentence, dictionary = ordo_keynes_dict)
+
+
+ordo_keynes_df_sentence <- convert(ordo_dict_original_dfm_sentence, 
+                                   to = "data.frame")
+
+ordo_keynes_df_sentence[,2:7] <- ordo_keynes_df_sentence[,2:7] / ntoken(tokens_Semester_sentence)
+
+#top 10 "Keynes" documents, by proportion
+ordo_keynes_df_sentence %>% slice_max(ordo_original, n = 10)
+
+```
+
+Let's inspect these sentences
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+corp_Semester_sentence %>%
+  corpus_subset(docname_ == '2015_DBP Communication_Comm_EA.pdf.107') %>%
+  as.character()
+
+
+corp_Semester_sentence %>%
+  corpus_subset(docname_ == "2016_AMR_Comm_EU.pdf.618") %>%
+  as.character()
+
+
+```
+
+Let's use the sentence-based corpus for creating a sentence-based dfm with words occurring at least 10 times
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+dim(dfm_Semester_sentence)
+
+dfm_Semester_sentence <- dfm_Semester_sentence %>% 
+    dfm_trim(min_termfreq = 10)
+
+dim(dfm_Semester_sentence)
+
+topfeatures(dfm_Semester_sentence, 25)
+
+ndoc(dfm_Semester_sentence) #59001
+
+```
+
+Let's set seeds to the LSS algorithm.
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+###using entire dictionaries as seed 
+
+ordo_keynes_dict
+
+seed_original <- setNames(c(rep(1, length(ordo_keynes_dict$ordo_original)), 
+                            rep(-1, length(ordo_keynes_dict$keynes_original))), 
+                          c(ordo_keynes_dict$ordo_original, ordo_keynes_dict$keynes_original))
+
+print(seed_original)
+
+###using expert-validated dictionary words
+
+seed_expert <- setNames(c(rep(1, length(ordo_keynes_dict$ordo_expert)), 
+                          rep(-1, length(ordo_keynes_dict$keynes_expert))), 
+                        c(ordo_keynes_dict$ordo_expert, ordo_keynes_dict$keynes_expert))
+
+print(seed_expert)
+
+###using revised dictionary words
+
+seed_revised <- setNames(c(rep(1, length(ordo_keynes_dict$ordo_revised)), 
+                           rep(-1, length(ordo_keynes_dict$keynes_revised))), 
+                         c(ordo_keynes_dict$ordo_revised, ordo_keynes_dict$keynes_revised))
+
+print(seed_revised)
+
+```
+
+
+Run LSS models
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+tmod_lss <- textmodel_lss(dfm_Semester_sentence, 
+                          seeds = seed_original,
+                          terms = NULL, 
+                          k = 300, 
+                          cache = TRUE)
+
+
+head(coef(tmod_lss), 50) # most ordoliberal words 
+tail(coef(tmod_lss), 50) # most keynesian words - lots are about the labour/ education 'theme'
+
+
+tmod_lss_expert <- textmodel_lss(dfm_Semester_sentence, 
+                                 seeds = seed_expert,
+                                 terms = NULL, 
+                                 k = 300, 
+                                 cache = TRUE)
+
+
+head(coef(tmod_lss_expert), 50)
+tail(coef(tmod_lss_expert), 50) 
+
+
+# run LSS model (NB. no context words ('terms')) expert dictionary
+tmod_lss_revised <- textmodel_lss(dfm_Semester_sentence, 
+                                  seeds = seed_revised,
+                                  terms = NULL, 
+                                  k = 300, 
+                                  cache = TRUE)
+
+
+head(coef(tmod_lss_revised), 120)
+tail(coef(tmod_lss_revised), 120) 
+
+```
+
+
+
+Plot words and highlight seed words 
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+text_plot_terms <- textplot_terms(tmod_lss, highlighted = c("investment", "training", "stimulation", "diversification", "employability", "jobs", "supervision", "procedure", "transposed", "enforcing", "rigorous", "discipline", "consolidation") , max_words = 200)
+
+
+
+ggsave(text_plot_terms, file = "Figures/textplot_terms.pdf",
+       width = 10, height = 8)
+
+```
+
+Create document level scores
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+#reconstruct original articles from their sentences using dfm_group() before predicting polarity of documents.
+
+df_Semester_doc <- dfm_group(dfm_Semester_sentence)
+dat <- docvars(df_Semester_doc)
+
+#generate document level predictions of lss model
+dat$fit <- predict(tmod_lss, newdata = df_Semester_doc)
+dat$fit_expert <- predict(tmod_lss_expert, newdata = df_Semester_doc)
+dat$fit_revised <- predict(tmod_lss_revised, newdata = df_Semester_doc)
+
+```
+
+Let's save these results for later analysis. 
+
+```{r, echo = TRUE, results = 'verbatim', message = FALSE}
+
+write.csv2(dat, file = "lss_data.csv")
+
+
+lss_data <- read.csv2("lss_data.csv",
+                     header = TRUE,
+                     sep = ";")
+
+```
+
+Robustness check: Plot correlations between fit statistics obtained from original, expert and revised dictionaries.
+
+```{r}
+
+correlation_plot_original_expert <- ggplot(lss_data, aes(fit, fit_expert)) + 
+  geom_point(pch = 21, fill = "gray25", color = "white", size = 2.5) +
+  scale_x_continuous(name = "Scores based on original dictionary") +
+  scale_y_continuous(name = "Scores based on expert dictionary") +
+  theme_minimal()
+
+
+print(correlation_plot_original_expert)
+
+ggsave(correlation_plot_original_expert, file = "Figures/correlation_plot_original_expert.pdf",
+       width = 10, height = 8)
+
+
+correlation_plot_original_revised <- ggplot(lss_data, aes(fit, fit_revised)) + 
+  geom_point(pch = 21, fill = "gray25", color = "white", size = 2.5) +
+  scale_x_continuous(name = "Scores based on original dictionary") +
+  scale_y_continuous(name = "Scores based on revised dictionary") +
+  theme_minimal()
+
+
+print(correlation_plot_original_revised)
+
+ggsave(correlation_plot_original_revised, file = "Figures/correlation_plot_original_revised.pdf",
+       width = 10, height = 8)
+
+```
+
+Robustness check: obtain LSS scores for different k
+
+```{r}
+
+tmod_lss <- textmodel_lss(dfm_Semester_sentence, 
+                          seeds = seed_original,
+                          terms = NULL, 
+                          k = 300, 
+                          cache = TRUE)
+
+tmod_lss_200 <- textmodel_lss(dfm_Semester_sentence, 
+                          seeds = seed_original,
+                          terms = NULL, 
+                          k = 200, 
+                          cache = TRUE)
+
+
+tmod_lss_100 <- textmodel_lss(dfm_Semester_sentence, 
+                          seeds = seed_original,
+                          terms = NULL, 
+                          k = 100, 
+                          cache = TRUE)
+
+dat$fit_200 <- predict(tmod_lss_200, newdata = df_Semester_doc)
+dat$fit_100 <- predict(tmod_lss_100, newdata = df_Semester_doc)
+
+cor(dat[, c('fit', 'fit_200', 'fit_100')])
+
+```
