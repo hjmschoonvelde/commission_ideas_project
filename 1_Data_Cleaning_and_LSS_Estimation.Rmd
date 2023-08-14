@@ -1,7 +1,4 @@
 ---
-title: "Script to generate results in Graham, Schoonvelde, Swinkels"
-author: "Martijn Schoonvelde"
-date: "August 2023"
 output: html_document
 ---
 
@@ -9,12 +6,14 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Script to generate results in **Script to generate results in Unpacking the European Commission’s fiscal policy response to crisis: mapping and explaining economic ideas in the European Semester 2011-22**.
 
-We'll first load the libraries that are necessary to run the analyses in this paper. 
+Version: **August 2023**
+
+We'll first load the pacakges that are necessary to run the analyses in this paper. 
 
 ```{r, out.width='\\textwidth', message=FALSE, warning=FALSE}
 
-#load library
 library(quanteda)
 library(readtext)
 library(stringr)
@@ -80,7 +79,7 @@ Semester_DF$text <- list_pdfs
 
 ```
 
-We'll now clean these texts using the `stringr` library
+We'll now clean these texts using the `stringr` package
 
 ```{r, echo = TRUE, results = 'verbatim', message = FALSE}
 
@@ -90,17 +89,22 @@ Semester_DF$text <- str_replace_all(Semester_DF$text, "[\n]", " ")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "Graph [0-9]*:.*?(Note:|Source)"," ")
 Semester_DF$text <- str_replace_all(Semester_DF$text, url_regex, "")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "[A-Z]{5,}", " ")
-Semester_DF$text <- str_replace_all(Semester_DF$text, "( EN | THE | OF | TO | FIND | PATH | ADD | AND | FROM | IN )", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "( EN | ?THE ?| OF | TO | FIND | PATH | ADD | AND | FROM | IN | ?COM ?| AT | BE | BG | CY | CZ | DE | DK | EE | EL | ES | FI | FR | HR | HU | IE | IT | LT | LU | LV | MT | NL | PL | PT | RO | SE | SI | SK | UK | EU | EA )", " ")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "Q\\d", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "[A-Z]\\. ", " ")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "[:symbol:]", " ")
-Semester_DF$text <- str_replace_all(Semester_DF$text, "[:digit:]", " ")
+Semester_DF$text <- str_replace_all( Semester_DF$text, "[:digit:]", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "[:punct:] [:punct]", " ")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "% ?|\\* ?|/ ?|:", " ")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "\\(.*?\\)", "")
 Semester_DF$text <- str_squish(Semester_DF$text)
 Semester_DF$text <- str_replace_all(Semester_DF$text, "(\\. ){2,}", "")
-Semester_DF$text <- str_replace_all(Semester_DF$text, " - ", "")
+Semester_DF$text <- str_replace_all(Semester_DF$text, " - -", "")
+Semester_DF$text <- str_replace_all(Semester_DF$text, "\\. ?-", "")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "Done at Brussels.*", "")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "unem ploym ent", "unemployment")
 Semester_DF$text <- str_replace_all(Semester_DF$text, "em ploym ent", "employment")
+Semester_DF$text <- str_squish(Semester_DF$text)
 
 ```
 
@@ -296,11 +300,15 @@ cor(ordo_keynes_df[,2:7] / ntoken(tokens_Semester))
 
 ```
 
-Let's check the coverage of dictionary terms on a sentence to sentence basis. Let's first create a sentence-based dfm
+Let's check the coverage of dictionary terms on a sentence to sentence basis. Let's first create a sentence-based dfm, using sentences that have at least 5 tokens and fewer than 100 tokens. 
 
 ```{r, echo = TRUE, results = 'verbatim', message = FALSE}
 
 corp_Semester_sentence <- corpus_reshape(corpus_Semester, to =  "sentence")
+tokens <- ntoken(corp_Semester_sentence)
+
+corp_Semester_sentence <- corpus_subset(corp_Semester_sentence, tokens >= 5 & tokens <=200)
+
 
 tokens_Semester_sentence <- tokens(corp_Semester_sentence,
                           what = "word",
@@ -363,7 +371,7 @@ dim(dfm_Semester_sentence)
 
 topfeatures(dfm_Semester_sentence, 25)
 
-ndoc(dfm_Semester_sentence) #59001
+ndoc(dfm_Semester_sentence) 
 
 ```
 
@@ -372,8 +380,6 @@ Let's set seeds to the LSS algorithm.
 ```{r, echo = TRUE, results = 'verbatim', message = FALSE}
 
 ###using entire dictionaries as seed 
-
-ordo_keynes_dict
 
 seed_original <- setNames(c(rep(1, length(ordo_keynes_dict$ordo_original)), 
                             rep(-1, length(ordo_keynes_dict$keynes_original))), 
@@ -434,20 +440,28 @@ tmod_lss_revised <- textmodel_lss(dfm_Semester_sentence,
                                   cache = TRUE)
 
 
-head(coef(tmod_lss_revised), 120)
-tail(coef(tmod_lss_revised), 120) 
+head(coef(tmod_lss_revised), 50)
+tail(coef(tmod_lss_revised), 50) 
+
+
+
+
+docvars(dfm_Semester_sentence, "fit") <- predict(tmod_lss, newdata = dfm_Semester_sentence)
+sentences <- dfm_Semester_sentence
+sentences <- docvars(sentences)
+sentences$text <- as.character(corp_Semester_sentence)
+sentences <- arrange(sentences, fit)
+
+head(sentences$text, 30)
+tail(sentences$text, 30)
 
 ```
-
-
 
 Plot words and highlight seed words 
 
 ```{r, echo = TRUE, results = 'verbatim', message = FALSE}
 
 text_plot_terms <- textplot_terms(tmod_lss, highlighted = c("investment", "training", "stimulation", "diversification", "employability", "jobs", "supervision", "procedure", "transposed", "enforcing", "rigorous", "discipline", "consolidation") , max_words = 200)
-
-
 
 ggsave(text_plot_terms, file = "Figures/textplot_terms.pdf",
        width = 10, height = 8)

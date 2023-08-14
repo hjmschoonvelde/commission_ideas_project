@@ -1,9 +1,10 @@
 ---
-title: "Script to generate results in Graham, Schoonvelde, Swinkels: Country Specific reports"
-author: "Martijn Schoonvelde"
-date: "August 2023"
 output: html_document
 ---
+
+Script to generate results in **Script to generate results in Unpacking the European Commission’s fiscal policy response to crisis: mapping and explaining economic ideas in the European Semester 2011-22**.
+
+Version: **August 2023**
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
